@@ -1,6 +1,6 @@
-use std::io::Read;
+use std::{cmp::min, io::Read};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 
 mod varint;
 
@@ -23,9 +23,26 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
             r.read_exact(&mut out[curr_offset..])
                 .context("EOF while reading literal")?;
         } else {
-            let (offset, len) = read_copy_tag(&mut r, tag).context("read copy tag")?;
+            let (offset, len): (u32, _) = read_copy_tag(&mut r, tag).context("read copy tag")?;
+            let offset = usize::try_from(offset).unwrap();
+            let len = usize::from(len);
 
-            todo!();
+            ensure!(
+                offset <= out.len(),
+                "offset past beginning of input: {} vs {}",
+                offset,
+                out.len()
+            );
+            let slice_start = out.len() - offset;
+            let slice_len = min(offset, len);
+
+            // Append `out[slice_start..][..slice_len]`, possibly many times.
+            let finished_len = out.len() + len;
+            while out.len() < finished_len {
+                let copy_len = min(slice_len, finished_len - out.len());
+                out.extend_from_within(slice_start..slice_start + copy_len);
+            }
+            debug_assert_eq!(out.len(), finished_len);
         }
     }
 
