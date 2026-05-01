@@ -24,8 +24,9 @@ pub fn read<R: Read>(mut r: R) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use test_case::test_case;
+
+    use super::*;
 
     #[test_case(&[0], 0; "zero")]
     #[test_case(&[0x40], 64; "64")]
