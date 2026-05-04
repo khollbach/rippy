@@ -45,6 +45,12 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
             debug_assert_eq!(out.len(), finished_len);
         }
     }
+    ensure!(
+        out.len() == len,
+        "decompressed output longer than expected: {} vs {}",
+        out.len(),
+        len
+    );
 
     Ok(out)
 }
@@ -62,7 +68,9 @@ fn read_literal_len<R: Read>(mut r: R, tag: u8) -> Result<u32> {
     let mut buf = [0; 4];
     r.read_exact(&mut buf[..width]).context("unexpected EOF")?;
 
-    let len = u32::from_le_bytes(buf);
+    let len = u32::from_le_bytes(buf)
+        .checked_add(1)
+        .context("literal len must not equal 2^32 (since total len must not equal 2^32)")?;
     Ok(len)
 }
 
