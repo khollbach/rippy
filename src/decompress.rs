@@ -5,21 +5,37 @@ use anyhow::{Context, Result, ensure};
 mod varint;
 
 pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
-    let len: u32 = varint::read(&mut r).context("read total len")?;
-    let len = usize::try_from(len).unwrap();
-    let mut out = Vec::with_capacity(len);
+    let total_len: u32 = varint::read(&mut r).context("read total len")?;
+    let total_len = usize::try_from(total_len).unwrap();
+    let mut out = Vec::with_capacity(total_len);
 
-    while out.len() < len {
+    while out.len() < total_len {
         let mut buf = [0];
-        r.read_exact(&mut buf)
-            .with_context(|| format!("unexpected EOF; decoded {} of {} bytes", out.len(), len))?;
+        r.read_exact(&mut buf).with_context(|| {
+            format!(
+                "unexpected EOF; decoded {} of {} bytes",
+                out.len(),
+                total_len,
+            )
+        })?;
         let tag = buf[0];
 
         if tag & 0x3 == 0x0 {
             let lit_len: u32 = read_literal_len(&mut r, tag).context("read literal len")?;
             let lit_len = usize::try_from(lit_len).unwrap();
+
             let curr_offset = out.len();
-            out.resize(curr_offset + lit_len, 0);
+            let new_len = curr_offset + lit_len;
+            ensure!(
+                new_len <= total_len,
+                "curr len plus literal len overflows total len: {} + {} = {} > {}",
+                curr_offset,
+                lit_len,
+                new_len,
+                total_len,
+            );
+            out.resize(new_len, 0);
+
             r.read_exact(&mut out[curr_offset..])
                 .context("EOF while reading literal")?;
         } else {
@@ -36,8 +52,17 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
             let slice_start = out.len() - offset;
             let slice_len = min(offset, len);
 
-            // Append `out[slice_start..][..slice_len]`, possibly many times.
             let finished_len = out.len() + len;
+            ensure!(
+                finished_len <= total_len,
+                "curr len plus copy len overflows total len: {} + {} = {} > {}",
+                out.len(),
+                len,
+                finished_len,
+                total_len,
+            );
+
+            // Append `out[slice_start..][..slice_len]`, possibly many times.
             while out.len() < finished_len {
                 let copy_len = min(slice_len, finished_len - out.len());
                 out.extend_from_within(slice_start..slice_start + copy_len);
@@ -46,10 +71,10 @@ pub fn decompress<R: Read>(mut r: R) -> Result<Vec<u8>> {
         }
     }
     ensure!(
-        out.len() == len,
+        out.len() == total_len,
         "decompressed output longer than expected: {} vs {}",
         out.len(),
-        len
+        total_len
     );
 
     Ok(out)
