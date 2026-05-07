@@ -2,6 +2,7 @@ use std::{cmp::min, collections::HashMap};
 
 use crate::varint;
 
+const BLOCK_SIZE: usize = 64 * 1024;
 const MAX_COPY_LEN: usize = 64;
 
 /// Panics if input.len() > u32::MAX.
@@ -15,6 +16,16 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 
     // Header: uncompressed length.
     varint::write(u32::try_from(n).unwrap(), &mut out);
+
+    for chunk in input.chunks(BLOCK_SIZE) {
+        compress_block(chunk, &mut out);
+    }
+
+    out
+}
+
+fn compress_block(input: &[u8], out: &mut Vec<u8>) {
+    let n = input.len();
 
     let mut emitted = 0; // num input bytes compressed so far
     let mut seen = HashMap::with_capacity(n); // (todo...)
@@ -38,11 +49,11 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
             }
 
             if emitted < i {
-                literal(&input[emitted..i], &mut out);
+                literal(&input[emitted..i], out);
                 emitted = i;
             }
 
-            copy(i - i0, match_len, &mut out);
+            copy(i - i0, match_len, out);
             emitted += match_len;
 
             next_i = min(i + match_len, i_limit);
@@ -55,10 +66,8 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     }
 
     if emitted < n {
-        literal(&input[emitted..n], &mut out);
+        literal(&input[emitted..n], out);
     }
-
-    out
 }
 
 fn literal(data: &[u8], out: &mut Vec<u8>) {
