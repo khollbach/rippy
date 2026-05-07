@@ -2,6 +2,8 @@ use std::{cmp::min, collections::HashMap};
 
 use crate::varint;
 
+const MAX_COPY_LEN: usize = 64;
+
 /// Panics if input.len() > u32::MAX.
 pub fn compress(input: &[u8]) -> Vec<u8> {
     let n = input.len();
@@ -27,7 +29,10 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
             // the slices differ. (Note that the slices might overlap, and
             // that's ok.)
             let mut match_len = 4;
-            while i + match_len < n && input[i0 + match_len] == input[i + match_len] {
+            while match_len < MAX_COPY_LEN
+                && i + match_len < n
+                && input[i0 + match_len] == input[i + match_len]
+            {
                 match_len += 1;
             }
 
@@ -85,5 +90,35 @@ fn literal(data: &[u8], out: &mut Vec<u8>) {
 }
 
 fn copy(offset: usize, len: usize, out: &mut Vec<u8>) {
-    
+    debug_assert!(offset != 0);
+    debug_assert!(offset <= usize::try_from(u32::MAX).unwrap());
+    debug_assert!(len != 0);
+    debug_assert!(len <= MAX_COPY_LEN);
+
+    // "1-byte" offset
+    if (4..=11).contains(&len) && offset < 1 << 11 {
+        let len_minus_4 = u8::try_from(len - 4).unwrap();
+        debug_assert!(len_minus_4 <= 0x7);
+
+        let offset_high = u8::try_from(offset >> 8).unwrap();
+        debug_assert!(offset_high <= 0x7);
+        let offset_low = u8::try_from(offset & 0xff).unwrap();
+
+        let tag = offset_high << 5 | len_minus_4 << 2 | 0x1;
+        out.push(tag);
+        out.push(offset_low);
+    }
+    // 2-byte offset
+    else if let Ok(offset) = u16::try_from(offset) {
+        let tag = u8::try_from(len - 1).unwrap() << 2 | 0x2;
+        out.push(tag);
+        out.extend_from_slice(&offset.to_le_bytes());
+    }
+    // 4-byte offset
+    else {
+        let offset = u32::try_from(offset).unwrap();
+        let tag = u8::try_from(len - 1).unwrap() << 2 | 0x3;
+        out.push(tag);
+        out.extend_from_slice(&offset.to_le_bytes());
+    }
 }
